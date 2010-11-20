@@ -356,7 +356,7 @@ pidfile_create_for_boss() {
         return ${ERR_NOPERM}
     }
 
-#>&2 echo "START BOSS HERE"
+>&2 echo "START BOSS HERE"
 
     # Create boss pid file
     { set -C; 2>/dev/null echo "$$" >"${pf}"; } && {
@@ -403,32 +403,6 @@ cmdline() {
 #
 #
 #}
-
-start_boss() {
-    #global _pidfile
-    local waiting_pid=0
-
-    # pidfile_create_for_boss reports any errors
-    _pidfile="$(pidfile_create_for_boss "${pid_file}" "${queue_file}")" || {
-        exit $?
-    }
-
-    # Existing boss for queue already running?
-    [ -z "${_pidfile}" ] && exit ${ERR_NONE}
-    
-    echo "Starting boss for queue ${queue_file} (PID: $(<"${_pidfile}"))"
-
-    while :; do #{
-        sleep 1
-    done #}
-
-    return ${ERR_NONE}
-}
-
-
-
-
-
 
 # Output configuration file
 output_config() {
@@ -618,9 +592,17 @@ queue_file="/tmp/${_binname}.${USER}.${queue}.queue"
 
 # Start boss
 
-# start_boss reports any errors
-start_boss
-ret=$?
+_pidfile="$(pidfile_create_for_boss "${pid_file}" "${queue_file}")" && {
+    [ -z "${_pidfile}" ] && {
+        # Existing boss for queue already running
+        exit ${ERR_NONE}
+    }
+
+    echo "Started boss for queue ${queue_file} (PID: $(<"${_pidfile}"))"
+
+sleep 60
+#    exit ${ERR_NONE}
+}
 
 
 

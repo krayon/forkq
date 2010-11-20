@@ -185,6 +185,7 @@ boss_start="${BOSS_START}"
 _lockfile=''
 _pidfile=''
 tmpdir=''
+tmpfile=''
 pwd="$(pwd)"
 
 
@@ -280,6 +281,9 @@ cleanup() {
     decho "Temp dir: ${tmpdir}"
     [ -n "${tmpdir}"    ] && rm -Rf "${tmpdir}"    &>/dev/null
     tmpdir=''
+    decho "Temp file: ${tmpfile}"
+    [ -n "${tmpfile}"   ] && rm -Rf "${tmpfile}"   &>/dev/null
+    tmpfile=''
     decho "PWD: ${pwd}"
     [ -n "${pwd}"       ] && cd "${pwd}"           &>/dev/null
     pwd=''
@@ -298,11 +302,13 @@ trapexit() {
     cleanup
 }
 
-# Takes lockfile path
-lockfile_create() {
-    # Create lockfile
-    { set -C; 2>/dev/null >"${1}"; } && {
-        echo "${1}"
+# Creates a file (atomically) if it can with optional contents
+atomic_file_create() {
+    filepath="${1}"; shift 1
+
+    # Create file
+    { set -C; cat 2>/dev/null >"${filepath}" <<<"${@}"; } && {
+        echo "${filepath}"
         return ${ERR_NONE}
     }
 
@@ -318,14 +324,36 @@ cmdline_param() {
     cut -d $'\0' -f "${2}" <"/proc/${1}/cmdline"
 }
 
+# Takes lockfile path (1) and queue name (2)
+lockfile_create_for_queue() {
+    local filepath="${1}"; shift 1
+    local q="${1}"; shift 1
+    local n_timeout=60
+
+    while [ ${n_timeout} -gt 0 ]; do #{
+        _lockfile="$(atomic_file_create "${filepath}")" && break
+
+        n_timeout=$((n_timeout - 1))
+        sleep 1
+        continue
+    done #}
+
+    [ -z "${_lockfile}" ] && {
+        >&2 echo "ERROR: Timeout waiting for queue lock for queue ${q}"
+        return ${ERR_UNAVAILABLE}
+    }
+
+    return ${ERR_NONE}
+}
+
 # Takes pidfile path (1) and queue name (2)
 pidfile_create_for_boss() {
-    local pf="${1}"; shift 1
+    local filepath="${1}"; shift 1
     local q="${1}"; shift 1
     local old_pid=''
 
     # Check for existing boss job
-    [ -r "${pf}" ] && read old_pid <"${pf}"
+    [ -r "${filepath}" ] && read old_pid <"${filepath}"
 
     [ -n "${old_pid}" ] && {
         [ -d "/proc/${old_pid}" ] && {
@@ -352,20 +380,19 @@ pidfile_create_for_boss() {
         }
 
         # Stale pid file
-        >&2 echo "ERROR: (Stale?) PID file exists: ${pf}"
+        >&2 echo "ERROR: (Stale?) PID file exists: ${filepath}"
         return ${ERR_NOPERM}
     }
 
->&2 echo "START BOSS HERE"
+#>&2 echo "START BOSS HERE"
 
     # Create boss pid file
-    { set -C; 2>/dev/null echo "$$" >"${pf}"; } && {
-        echo "${pf}"
-        return ${ERR_NONE}
+    _pidfile="$(atomic_file_create "${filepath}" "$$")" || {
+        >&2 echo "ERROR: Unable to create new pid file for boss of queue ${q}"
+        return ${ERR_UNAVAILABLE}
     }
 
-    >&2 echo "ERROR: Unable to create new pid file for boss of queue ${q}"
-    return ${ERR_UNAVAILABLE}
+    return $?
 }
 
 # Takes PID, outputs the original commandline
@@ -389,7 +416,7 @@ cmdline() {
 #
 #n_timeout=60
 #while [ ${n_timeout} -gt 0 ]; do #{
-#    lockfile="$(lockfile_create "/tmp/${_binname}.${USER}.${queue}.queue.lock")" && break
+#    lockfile="$(atomic_file_create "/tmp/${_binname}.${USER}.${queue}.queue.lock")" && break
 #
 #    n_timeout=$((n_timeout - 1))
 #    sleep 1
@@ -403,6 +430,75 @@ cmdline() {
 #
 #
 #}
+
+start_boss() {
+    #global _pidfile
+    local waiting_pid=0
+    local n_queue_depth=0
+    local n_queue_depth_last=1
+
+    # pidfile_create_for_boss reports any errors
+    pidfile_create_for_boss "${pid_file}" "${queue}" || {
+        exit $?
+    }
+
+    # Existing boss for queue already running?
+    [ -z "${_pidfile}" ] && exit ${ERR_NONE}
+
+    # Create temp file
+    tmpfile="$(mktemp --tmpdir "${_binname}.${USER}.tmp.XXXXX")" || {
+        >&2 echo "ERROR: Failed to create temporary file"
+        exit ${ERR_CANTCREAT}
+    }
+    
+    echo "Starting boss for queue "'"'"${queue}"'"'" (PID: $(<"${_pidfile}"))"
+
+    while :; do #{
+        sleep 1
+
+        read -r n_queue_depth < <(wc -l <"${queue_file}")
+        [ ${n_queue_depth} -le 0 ] && {
+            [ ${n_queue_depth_last} -gt 0 ] && {
+                echo "Queue empty"
+                n_queue_depth_last='0'
+            }
+            continue
+        }
+        n_queue_depth_last="${n_queue_depth}"
+
+        # lockfile_create_for_queue reports any errors
+        lockfile_create_for_queue "/tmp/${_binname}.${USER}.${queue}.queue.lock" "${queue}" || {
+            continue
+        }
+
+        # Failed to create lock file?
+        [ -z "${_lockfile}" ] && continue
+
+
+
+        # Queue is ours
+        cmd="$(head -1 "${queue_file}")"
+        tail -n +2 <"${queue_file}" >"${tmpfile}"
+        cat "${tmpfile}" >"${queue_file}"
+
+        # Unlock the queue lock
+        rm "${_lockfile}" && _lockfile=''
+
+>&2 echo "Popped queue item: ${cmd}"
+
+>&2 echo "Executing: ${cmd}"
+        eval "${cmd}"
+>&2 echo "Finished: ${cmd}"
+
+    done #}
+
+    return ${ERR_NONE}
+}
+
+
+
+
+
 
 # Output configuration file
 output_config() {
@@ -565,44 +661,34 @@ queue_file="/tmp/${_binname}.${USER}.${queue}.queue"
 
 # Something to add to the queue?
 [ "${#@}" -gt 0 ] && {
-    n_timeout=60
-    while [ ${n_timeout} -gt 0 ]; do #{
-        _lockfile="$(lockfile_create "/tmp/${_binname}.${USER}.${queue}.queue.lock")" && break
+    read -r n_queue_depth < <(wc -l <"${queue_file}")
 
-        n_timeout=$((n_timeout - 1))
-        sleep 1
-        continue
-    done #}
-
-    [ -z "${_lockfile}" ] && {
-        >&2 echo "ERROR: Timeout waiting for queue lock"
-        exit ${ERR_UNAVAILABLE}
+    # lockfile_create_for_queue reports any errors
+    lockfile_create_for_queue "/tmp/${_binname}.${USER}.${queue}.queue.lock" "${queue}" || {
+        exit $?
     }
+
+    # Failed to create lock file?
+    [ -z "${_lockfile}" ] && exit ${ERR_NONE}
 
     # Write new command to queue
     echo "${@@Q}" >>"${queue_file}"
 
     # Unlock the queue lock
     rm "${_lockfile}" && _lockfile=''
+
+    echo "Added to queue "'"'"${queue}"'"'" (pos ${n_queue_depth}): ${@@Q}"
 }
 
-[ "${BOSS_START}" == '0' ] && exit ${ERR_NONE}
+[ "${boss_start}" == '0' ] && exit ${ERR_NONE}
 
 
 
 # Start boss
 
-_pidfile="$(pidfile_create_for_boss "${pid_file}" "${queue_file}")" && {
-    [ -z "${_pidfile}" ] && {
-        # Existing boss for queue already running
-        exit ${ERR_NONE}
-    }
-
-    echo "Started boss for queue ${queue_file} (PID: $(<"${_pidfile}"))"
-
-sleep 60
-#    exit ${ERR_NONE}
-}
+# start_boss reports any errors
+start_boss
+ret=$?
 
 
 

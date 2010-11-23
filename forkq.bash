@@ -406,31 +406,6 @@ cmdline() {
     tr '\0' ' '<"/proc/${1}/cmdline"
 }
 
-#start_boss() {
-#    local pf="${1}"; shift 1
-#    local q="${1}"; shift 1
-#
-#    # Takes pidfile path (1) and queue name (2)
-#    pidfile_create_for_boss "${pf}" "${q}"
-#}
-#
-#n_timeout=60
-#while [ ${n_timeout} -gt 0 ]; do #{
-#    lockfile="$(atomic_file_create "/tmp/${_binname}.${USER}.${queue}.queue.lock")" && break
-#
-#    n_timeout=$((n_timeout - 1))
-#    sleep 1
-#    continue
-#done #}
-#
-#[ -z "${lockfile}" ] && {
-#    >&2 echo "ERROR: Timeout waiting for queue lock"
-#    exit ${ERR_UNAVAILABLE}
-#}
-#
-#
-#}
-
 start_boss() {
     #global _pidfile
     local waiting_pid=0

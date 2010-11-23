@@ -16,5 +16,13 @@ o888o   `Y8bod8P' d888b    o888o o888o `V8bod888
 Forkq (pronounced _fork queue_) is a background queuing service for Linux (and
 compatible) shell jobs.
 
+# TODO
+
+- Make queue backwards
+  - Better support for huge queues
+  - Puts heavy processing on adding to queue instead of processing the queue
+- Add job logging
+- Add job comments
+
 ----
 [//]: # ( vim: set ts=4 sw=4 et cindent tw=80 ai si syn=markdown ft=markdown: )

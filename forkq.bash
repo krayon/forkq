@@ -634,6 +634,12 @@ decho "START"
 pid_file="/tmp/${_binname}.${USER}.${queue}.pid"
 queue_file="/tmp/${_binname}.${USER}.${queue}.queue"
 
+# Ensure queue file exists
+touch "${queue_file}" || {
+    >&2 echo "ERROR: No write access to queue ${queue} file: ${queue_file}"
+    exit ${ERR_NOPERM}
+}
+
 # Something to add to the queue?
 [ "${#@}" -gt 0 ] && {
     read -r n_queue_depth < <(wc -l <"${queue_file}")

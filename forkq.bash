@@ -3,7 +3,7 @@
 #
 #/**********************************************************************
 #    forkq
-#    Copyright (C)2010-2010 Todd Harbour (krayon)
+#    Copyright (C)2010-2023 Todd Harbour (krayon)
 #
 #    This program is free software; you can redistribute it and/or
 #    modify it under the terms of the GNU General Public License
@@ -665,69 +665,9 @@ queue_file="/tmp/${_binname}.${USER}.${queue}.queue"
 start_boss
 ret=$?
 
-
-
-
-
-#$ eval "$(\tail -1  /tmp/forkq.bash.queue.default)"
-
-
-
-
-
-
-
-
-
-
 decho "DONE"
 
 # Clean up is called on exit
 #cleanup
 
 exit ${ret}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#!/bin/bash
-
-cat <<EOF
-\$0:          $0
-readlink \$0: $(readlink "${0}")
-basename \$0: $(basename "${0}")
-dirname  \$0: $(dirname  "${0}")
-
-${#}:
-EOF
-k=0
-for v in "${@}"; do #{
-    k=$((${k} + 1))
-    echo "  ${k}: ${v}"
-done #}
-
-echo
-
-read -N 1 -t 3 char || {
-    echo "NO stdin AVAILABLE"
-    exit ${ERR_NONE}
-}
-
-echo "STDIN:"
-echo
-
-echo -n "$char"
-cat

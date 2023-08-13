@@ -139,10 +139,6 @@ while read -r -d: conf; do #{
 done <<<"${_CONFS}" #}
 ####################################}
 
-
-# Quit on error
-set -e
-
 # Version
 APP_NAME="forkq"
 APP_VER="0.0.1"
@@ -292,9 +288,6 @@ cleanup() {
 trapint() {
     >&2 echo "WARNING: Signal received: ${1}"
 
-    # Clean up is called on exit
-    #cleanup
-
     exit ${1}
 } # trapint()
 
@@ -384,8 +377,6 @@ pidfile_create_for_boss() {
         return ${ERR_NOPERM}
     }
 
-#>&2 echo "START BOSS HERE"
-
     # Create boss pid file
     _pidfile="$(atomic_file_create "${filepath}" "$$")" || {
         >&2 echo "ERROR: Unable to create new pid file for boss of queue ${q}"
@@ -459,19 +450,17 @@ start_boss() {
         # Unlock the queue lock
         rm "${_lockfile}" && _lockfile=''
 
->&2 echo "Popped queue item: ${cmd}"
-
->&2 echo "Executing: ${cmd}"
-        eval "${cmd}"
->&2 echo "Finished: ${cmd}"
+        decho "Executing queued item: ${cmd}"
+        # TODO: Capture stderr for error display?
+        eval "${cmd}" || {
+            >&2 echo "ERROR: Failed to execute: ${cmd}"
+        }
+        decho "Completed queued item: ${cmd}"
 
     done #}
 
     return ${ERR_NONE}
 }
-
-
-
 
 
 
@@ -636,7 +625,7 @@ queue_file="/tmp/${_binname}.${USER}.${queue}.queue"
 
 # Ensure queue file exists
 touch "${queue_file}" || {
-    >&2 echo "ERROR: No write access to queue ${queue} file: ${queue_file}"
+    >&2 echo "ERROR: No write access to queue "'"'"${queue}"'"'" file: ${queue_file}"
     exit ${ERR_NOPERM}
 }
 
@@ -674,6 +663,5 @@ ret=$?
 decho "DONE"
 
 # Clean up is called on exit
-#cleanup
 
 exit ${ret}
